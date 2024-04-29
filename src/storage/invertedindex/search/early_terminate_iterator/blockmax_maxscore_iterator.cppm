@@ -66,14 +66,17 @@ private:
     // seperate the iterators into two parts:
     // 1. [0, pivot) : cannot add into part 2
     // 2. [pivot, n) : sum < threshold
+    u32 global_pivot_ = sorted_iterators_.size();
     u32 pivot_ = sorted_iterators_.size();
     // there is an "AND" requirement for the iterators 0, 1, ..., must_have_before_ - 1
     // we have must_have_before_ > 0 <=> pivot_ <= 1.
     // so: case 1: must_have_before_ = 0, pivot_ > 1.
     //     case 2: must_have_before_ > 0, pivot_ = 1.
+    u32 global_must_have_before_ = 0;
+    float global_must_have_total_upper_bound_score_ = 0.0f;
     u32 must_have_before_ = 0;
     float must_have_total_upper_bound_score_ = 0.0f;
-    Vector<int> bool_need_score_;
+    Vector<float> sub_threshold_;
     // bm25 score cache
     bool bm25_score_cached_ = false;
     bool need_seek_after_must_ = false;
@@ -84,10 +87,13 @@ private:
     // debug info
     u32 inner_pivot_loop_cnt = 0;
     u32 inner_must_have_loop_cnt_ = 0;
+    u32 inner_full_must_have_loop_cnt_ = 0;
     u32 use_prev_candidate_cnt_ = 0;
     u32 not_use_prev_candidate_cnt_ = 0;
-    Vector<Pair<u32, u64>> pivot_history_;
-    Vector<Pair<u32, u64>> must_have_history_;
+    // Vector<Pair<u32, u64>> global_pivot_history_;
+    // Vector<Pair<u32, u64>> global_must_have_history_;
+    // Vector<Pair<u32, u64>> pivot_history_;
+    // Vector<Pair<u32, u64>> must_have_history_;
 };
 
 } // namespace infinity

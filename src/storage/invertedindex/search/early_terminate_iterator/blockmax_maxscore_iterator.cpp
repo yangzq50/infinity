@@ -30,16 +30,16 @@ namespace infinity {
 BlockMaxMaxscoreIterator::~BlockMaxMaxscoreIterator() {
     OStringStream oss;
     oss << "BlockMaxMaxscoreIterator: Debug Info:\n    inner_pivot_loop_cnt: " << inner_pivot_loop_cnt
-        << " inner_must_have_loop_cnt: " << inner_must_have_loop_cnt_ << " use_prev_candidate_cnt: " << use_prev_candidate_cnt_
-        << " not_use_prev_candidate_cnt: " << not_use_prev_candidate_cnt_ << "\n";
-    oss << "    pivot_history:\n";
-    for (const auto &p : pivot_history_) {
-        oss << "    pivit value: " << p.first << " at doc_id: " << p.second << '\n';
-    }
-    oss << "    must_have_history:\n";
-    for (const auto &p : must_have_history_) {
-        oss << "    must_have value: " << p.first << " at doc_id: " << p.second << '\n';
-    }
+        << " inner_must_have_loop_cnt: " << inner_must_have_loop_cnt_ << " inner_full_must_have_loop_cnt: " << inner_full_must_have_loop_cnt_
+        << " use_prev_candidate_cnt: " << use_prev_candidate_cnt_ << " not_use_prev_candidate_cnt: " << not_use_prev_candidate_cnt_;
+    // oss << "    pivot_history:\n";
+    // for (const auto &p : pivot_history_) {
+    //     oss << "    pivit value: " << p.first << " at doc_id: " << p.second << '\n';
+    // }
+    // oss << "    must_have_history:\n";
+    // for (const auto &p : must_have_history_) {
+    //     oss << "    must_have value: " << p.first << " at doc_id: " << p.second << '\n';
+    // }
     LOG_INFO(std::move(oss).str());
 }
 
@@ -54,6 +54,7 @@ BlockMaxMaxscoreIterator::BlockMaxMaxscoreIterator(Vector<UniquePtr<EarlyTermina
                                 [](const u32 sum, const UniquePtr<EarlyTerminateIterator> &iter) -> u32 { return sum + iter->DocFreq(); });
     common_block_max_bm25_score_parts_.resize(sorted_iterators_.size());
     leftover_scores_upper_bound_.resize(sorted_iterators_.size());
+    sub_threshold_.resize(sorted_iterators_.size());
     for (u32 i = sorted_iterators_.size() - 1; i > 0; --i) {
         leftover_scores_upper_bound_[i - 1] = leftover_scores_upper_bound_[i] + sorted_iterators_[i]->BM25ScoreUpperBound();
     }
@@ -61,7 +62,7 @@ BlockMaxMaxscoreIterator::BlockMaxMaxscoreIterator(Vector<UniquePtr<EarlyTermina
 }
 
 // inherited from EarlyTerminateIterator
-bool BlockMaxMaxscoreIterator::BlockSkipTo(RowID doc_id, float threshold) {
+bool BlockMaxMaxscoreIterator::BlockSkipTo(RowID doc_id, const float threshold) {
     if (threshold > BM25ScoreUpperBound()) [[unlikely]] {
         return false;
     }
@@ -70,7 +71,7 @@ bool BlockMaxMaxscoreIterator::BlockSkipTo(RowID doc_id, float threshold) {
         bool match_any = false;
         u32 i = 0;
         for (float min_leftover_threshold = threshold; i < sorted_iterators_.size(); ++i) {
-            if (const auto &it = sorted_iterators_[i]; it->BlockSkipTo(doc_id, 0)) {
+            if (const auto &it = sorted_iterators_[i]; it->BlockSkipTo(doc_id, sub_threshold_[i])) {
                 // success in block skip
                 if (const RowID lowest_possible = it->BlockMinPossibleDocID(); lowest_possible <= doc_id) {
                     match_any = true;
@@ -93,6 +94,29 @@ bool BlockMaxMaxscoreIterator::BlockSkipTo(RowID doc_id, float threshold) {
             common_block_min_possible_doc_id_ = doc_id;
             common_block_last_doc_id_ = next_candidate - 1;
             assert((common_block_max_bm25_score_ >= threshold));
+            // update must have
+            u32 must_have_before = global_must_have_before_;
+            float must_have_total_upper_bound_score = global_must_have_total_upper_bound_score_;
+            while (must_have_before < sorted_iterators_.size() and
+                   threshold > must_have_total_upper_bound_score + common_block_max_bm25_score_parts_[must_have_before]) {
+                must_have_total_upper_bound_score += sorted_iterators_[must_have_before++]->BlockMaxBM25Score();
+            }
+            // if (must_have_before != global_must_have_before_) {
+            //     must_have_history_.emplace_back(must_have_before, doc_id_.ToUint64());
+            // }
+            must_have_before_ = must_have_before;
+            must_have_total_upper_bound_score_ = must_have_total_upper_bound_score;
+            if (must_have_before == 0) {
+                // update pivot
+                u32 pivot = global_pivot_;
+                while (pivot > 0 and threshold > (pivot > 1 ? common_block_max_bm25_score_parts_[pivot - 2] : BlockMaxBM25Score())) {
+                    --pivot;
+                }
+                // if (pivot != global_pivot_) {
+                //     pivot_history_.emplace_back(pivot, doc_id_.ToUint64());
+                // }
+                pivot_ = pivot;
+            }
             return true;
         }
         if (next_candidate == INVALID_ROWID) {
@@ -145,7 +169,7 @@ Pair<bool, RowID> BlockMaxMaxscoreIterator::SeekInBlockRange(RowID doc_id, const
             }
             doc_id = id1;
             u32 i = 1;
-            for (; i < sorted_iterators_.size(); ++i) {
+            for (; i < must_have_before_; ++i) {
                 const auto [success2, id2] = sorted_iterators_[i]->SeekInBlockRange(doc_id, block_end);
                 if (id2 != doc_id) {
                     // need to update doc_id, restart from the first iterator
@@ -153,7 +177,7 @@ Pair<bool, RowID> BlockMaxMaxscoreIterator::SeekInBlockRange(RowID doc_id, const
                     break;
                 }
             }
-            if (i == sorted_iterators_.size()) {
+            if (i == must_have_before_) {
                 doc_id_ = doc_id;
                 bm25_score_cached_ = false;
                 need_seek_after_must_ = true;
@@ -198,6 +222,9 @@ Tuple<bool, float, RowID> BlockMaxMaxscoreIterator::SeekInBlockRange(RowID doc_i
         while (true) {
             while (true) {
                 ++inner_must_have_loop_cnt_;
+                if (must_have_before_ + 1 >= sorted_iterators_.size()) {
+                    ++inner_full_must_have_loop_cnt_;
+                }
                 if (doc_id > block_end) [[unlikely]] {
                     return {false, 0.0F, INVALID_ROWID};
                 }
@@ -233,9 +260,9 @@ Tuple<bool, float, RowID> BlockMaxMaxscoreIterator::SeekInBlockRange(RowID doc_i
             }
             if (i == must_have_before_) {
                 for (; i < sorted_iterators_.size(); ++i) {
-                    const auto [success, score, id] = sorted_iterators_[i]->SeekInBlockRange(doc_id, doc_id, 0);
+                    const auto [success, _] = sorted_iterators_[i]->SeekInBlockRange(doc_id, doc_id);
                     if (success) {
-                        leftover_threshold -= score;
+                        leftover_threshold -= sorted_iterators_[i]->BlockMaxBM25Score();
                     }
                     if (leftover_threshold > common_block_max_bm25_score_parts_[i]) {
                         // no need to check the rest
@@ -244,6 +271,18 @@ Tuple<bool, float, RowID> BlockMaxMaxscoreIterator::SeekInBlockRange(RowID doc_i
                 }
             }
             if (i == sorted_iterators_.size()) {
+                for (i = must_have_before_; i < sorted_iterators_.size(); ++i) {
+                    const auto [success, _] = sorted_iterators_[i]->SeekInBlockRange(doc_id, doc_id);
+                    if (success) {
+                        leftover_threshold += sorted_iterators_[i]->BlockMaxBM25Score() - sorted_iterators_[i]->BM25Score();
+                    }
+                    if (leftover_threshold > 0.0f) {
+                        // no need to check the rest
+                        break;
+                    }
+                }
+            }
+            if (i == sorted_iterators_.size() and leftover_threshold <= 0.0f) {
                 doc_id_ = doc_id;
                 const float bm25_score = threshold - leftover_threshold;
                 bm25_score_cached_ = true;
@@ -271,27 +310,53 @@ Tuple<bool, float, RowID> BlockMaxMaxscoreIterator::SeekInBlockRange(RowID doc_i
             if (success) {
                 assert((id == doc_id));
                 match_any = true;
-                leftover_threshold -= it->BM25Score();
+                leftover_threshold -= it->BlockMaxBM25Score();
             }
             auto [success2, id2] = it->PeekInBlockRange(doc_id + 1, block_end);
             if (success2) {
                 next_candidate = std::min(next_candidate, id2);
             }
         }
-        if (match_any) {
-            for (u32 i = pivot_; i < sorted_iterators_.size() and leftover_threshold <= common_block_max_bm25_score_parts_[i - 1]; ++i) {
-                auto [success, id] = sorted_iterators_[i]->SeekInBlockRange(doc_id, doc_id);
-                if (success) {
-                    leftover_threshold -= sorted_iterators_[i]->BM25Score();
+        if (const float pivot_bar = common_block_max_bm25_score_parts_[pivot_ - 1]; match_any and leftover_threshold <= pivot_bar) {
+            u32 j = 0;
+            for (; j < pivot_; ++j) {
+                const auto &it = sorted_iterators_[j];
+                if (it->DocID() == doc_id) {
+                    leftover_threshold += it->BlockMaxBM25Score() - it->BM25Score();
+                }
+                if (leftover_threshold > pivot_bar) {
+                    // no need to check the rest
+                    break;
                 }
             }
-            if (leftover_threshold <= 0) {
-                doc_id_ = doc_id;
-                const float bm25_score = threshold - leftover_threshold;
-                bm25_score_cached_ = true;
-                bm25_score_cache_ = bm25_score;
-                prev_next_candidate_ = next_candidate;
-                return {true, bm25_score, doc_id};
+            if (j == pivot_) {
+                for (; j < sorted_iterators_.size(); ++j) {
+                    const auto [success, _] = sorted_iterators_[j]->SeekInBlockRange(doc_id, doc_id);
+                    if (success) {
+                        leftover_threshold -= sorted_iterators_[j]->BlockMaxBM25Score();
+                    }
+                    if (leftover_threshold > common_block_max_bm25_score_parts_[j]) {
+                        break;
+                    }
+                }
+                if (j == sorted_iterators_.size()) {
+                    for (j = pivot_; j < sorted_iterators_.size(); ++j) {
+                        if (sorted_iterators_[j]->DocID() == doc_id) {
+                            leftover_threshold += sorted_iterators_[j]->BlockMaxBM25Score() - sorted_iterators_[j]->BM25Score();
+                        }
+                        if (leftover_threshold > 0.0f) {
+                            break;
+                        }
+                    }
+                }
+                if (leftover_threshold <= 0) {
+                    doc_id_ = doc_id;
+                    const float bm25_score = threshold - leftover_threshold;
+                    bm25_score_cached_ = true;
+                    bm25_score_cache_ = bm25_score;
+                    prev_next_candidate_ = next_candidate;
+                    return {true, bm25_score, doc_id};
+                }
             }
         }
         assert((doc_id < next_candidate));
@@ -320,19 +385,26 @@ void BlockMaxMaxscoreIterator::UpdateScoreThreshold(const float threshold) {
         return;
     }
     const float base_threshold = threshold - BM25ScoreUpperBound();
-    for (const auto &it : sorted_iterators_) {
-        it->UpdateScoreThreshold(base_threshold + it->BM25ScoreUpperBound());
-    }
-    // update pivot
-    while (pivot_ > 0 and threshold > (pivot_ > 1 ? leftover_scores_upper_bound_[pivot_ - 2] : BlockMaxBM25Score())) {
-        --pivot_;
-        pivot_history_.emplace_back(pivot_, doc_id_.ToUint64());
+    for (u32 i = 0; i < sorted_iterators_.size(); ++i) {
+        const auto &it = sorted_iterators_[i];
+        if (const float it_threshold = base_threshold + it->BM25ScoreUpperBound(); it_threshold > 0.0f) {
+            sub_threshold_[i] = it_threshold;
+            it->UpdateScoreThreshold(it_threshold);
+        }
     }
     // update must have
-    while (must_have_before_ < sorted_iterators_.size() and
-           threshold > must_have_total_upper_bound_score_ + leftover_scores_upper_bound_[must_have_before_]) {
-        must_have_total_upper_bound_score_ += sorted_iterators_[must_have_before_++]->BM25ScoreUpperBound();
-        must_have_history_.emplace_back(must_have_before_, doc_id_.ToUint64());
+    while (global_must_have_before_ < sorted_iterators_.size() and
+           threshold > global_must_have_total_upper_bound_score_ + leftover_scores_upper_bound_[global_must_have_before_]) {
+        global_must_have_total_upper_bound_score_ += sorted_iterators_[global_must_have_before_++]->BM25ScoreUpperBound();
+        // global_must_have_history_.emplace_back(global_must_have_before_, doc_id_.ToUint64());
+    }
+    if (global_must_have_before_) {
+        return;
+    }
+    // update pivot
+    while (global_pivot_ > 0 and threshold > (global_pivot_ > 1 ? leftover_scores_upper_bound_[global_pivot_ - 2] : BM25ScoreUpperBound())) {
+        --global_pivot_;
+        // global_pivot_history_.emplace_back(global_pivot_, doc_id_.ToUint64());
     }
 }
 

@@ -56,6 +56,7 @@ private:
     RowID common_block_last_doc_id_{};
     float common_block_max_bm25_score_{};
     Vector<float> common_block_max_bm25_score_parts_; // value at i: blockmax of sum of BM25 scores for iter i + 1, i + 2, ..., n - 1
+    Vector<float> sub_threshold_;
     // won't change after initialization
     Vector<float> leftover_scores_upper_bound_;                  // value at i: upper bound of sum of BM25 scores for iter i + 1, i + 2, ..., n - 1
     Vector<UniquePtr<EarlyTerminateIterator>> sorted_iterators_; // sort by df, in ascending order

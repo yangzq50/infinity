@@ -17,8 +17,8 @@ module;
 #include <cassert>
 #include <cmath>
 #include <iostream>
-#include <tuple>
 #include <string>
+#include <tuple>
 module blockmax_term_doc_iterator;
 
 import stl;
@@ -96,7 +96,7 @@ void BlockMaxTermDocIterator::InitBM25Info(u64 total_df, float avg_column_len, F
 // weight included
 float BlockMaxTermDocIterator::BlockMaxBM25Score() {
     ++access_bm_score_cnt_;
-    if (const auto last_doc_id = BlockLastDocID(); last_doc_id == block_max_bm25_score_cache_end_id_) {
+    if (const auto last_doc_id = BlockLastDocID(); last_doc_id == block_max_bm25_score_cache_end_id_) [[likely]] {
         return block_max_bm25_score_cache_;
     } else {
         ++calc_bm_score_cnt_;

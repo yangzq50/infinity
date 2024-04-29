@@ -30,6 +30,7 @@ BlockMaxAndIterator::BlockMaxAndIterator(Vector<UniquePtr<EarlyTerminateIterator
     doc_freq_ = sorted_iterators_.front()->DocFreq();
     common_block_max_bm25_score_parts_.resize(sorted_iterators_.size());
     leftover_scores_upper_bound_.resize(sorted_iterators_.size());
+    sub_threshold_.resize(sorted_iterators_.size());
     for (u32 i = sorted_iterators_.size() - 1; i > 0; --i) {
         leftover_scores_upper_bound_[i - 1] = leftover_scores_upper_bound_[i] + sorted_iterators_[i]->BM25ScoreUpperBound();
     }
@@ -41,12 +42,15 @@ void BlockMaxAndIterator::UpdateScoreThreshold(float threshold) {
         return;
     }
     const float base_threshold = threshold - BM25ScoreUpperBound();
-    for (const auto &it : sorted_iterators_) {
-        it->UpdateScoreThreshold(base_threshold + it->BM25ScoreUpperBound());
+    for (u32 i = 0; i < sorted_iterators_.size(); ++i) {
+        if (const float sub_threshold = base_threshold + sorted_iterators_[i]->BM25ScoreUpperBound(); sub_threshold > 0.0f) {
+            sub_threshold_[i] = sub_threshold;
+            sorted_iterators_[i]->UpdateScoreThreshold(sub_threshold);
+        }
     }
 }
 
-bool BlockMaxAndIterator::BlockSkipTo(RowID doc_id, float threshold) {
+bool BlockMaxAndIterator::BlockSkipTo(RowID doc_id, const float threshold) {
     if (threshold > BM25ScoreUpperBound()) [[unlikely]] {
         return false;
     }
@@ -55,7 +59,7 @@ bool BlockMaxAndIterator::BlockSkipTo(RowID doc_id, float threshold) {
         u32 i = 0;
         for (; i < sorted_iterators_.size(); ++i) {
             const auto &it = sorted_iterators_[i];
-            if (!it->BlockSkipTo(doc_id, 0)) {
+            if (!it->BlockSkipTo(doc_id, sub_threshold_[i])) {
                 // no more possible results
                 return false;
             }
