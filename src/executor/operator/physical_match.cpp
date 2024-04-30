@@ -532,18 +532,22 @@ void AnalyzeFunc(const String &analyzer_name, String &&text, TermList &output_te
     }
 }
 
-void ExecuteFTSearch(UniquePtr<EarlyTerminateIterator> &et_iter, FullTextScoreResultHeap &result_heap, u32 &blockmax_loop_cnt) {
+void ExecuteFTSearch(UniquePtr<EarlyTerminateIterator> &et_iter, FullTextScoreResultHeap &result_heap, u32 &blockmax_loop_cnt, float begin_threshold) {
     if (et_iter) {
+        if (begin_threshold > 0.0f) {
+            et_iter->UpdateScoreThreshold(begin_threshold);
+        }
         while (true) {
-            auto [id, et_score] = et_iter->BlockNextWithThreshold(result_heap.GetScoreThreshold());
+            auto [id, et_score] = et_iter->BlockNextWithThreshold(begin_threshold);
             if (id == INVALID_ROWID) [[unlikely]] {
                 break;
             }
             ++blockmax_loop_cnt;
             if (result_heap.AddResult(et_score, id)) {
                 // update threshold
-                if (const float new_threshold = result_heap.GetScoreThreshold(); new_threshold > 0.0f) {
+                if (const float new_threshold = result_heap.GetScoreThreshold(); new_threshold > begin_threshold) {
                     et_iter->UpdateScoreThreshold(new_threshold);
+                    begin_threshold = new_threshold;
                 }
             }
         }
@@ -638,6 +642,7 @@ bool PhysicalMatch::ExecuteInnerHomebrewed(QueryContext *query_context, Operator
 
     // 3 full text search
     u32 top_n = 0;
+    float begin_threshold = 0.0f;
     if (auto iter_n_option = search_ops.options_.find("topn"); iter_n_option != search_ops.options_.end()) {
         int top_n_option = std::stoi(iter_n_option->second);
         if (top_n_option <= 0) {
@@ -646,6 +651,12 @@ bool PhysicalMatch::ExecuteInnerHomebrewed(QueryContext *query_context, Operator
         top_n = top_n_option;
     } else {
         top_n = DEFAULT_FULL_TEXT_OPTION_TOP_N;
+    }
+    if (auto iter_threshold_option = search_ops.options_.find("threshold"); iter_threshold_option != search_ops.options_.end()) {
+        begin_threshold = std::stof(iter_threshold_option->second);
+        if (begin_threshold <= 0.0f) {
+            RecoverableError(Status::SyntaxError("threshold must be a positive float"));
+        }
     }
     auto finish_query_builder_time = std::chrono::high_resolution_clock::now();
     TimeDurationType query_builder_duration = finish_query_builder_time - finish_parse_query_tree_time;
@@ -657,7 +668,7 @@ bool PhysicalMatch::ExecuteInnerHomebrewed(QueryContext *query_context, Operator
 #ifdef INFINITY_DEBUG
         auto blockmax_begin_ts = std::chrono::high_resolution_clock::now();
 #endif
-        ExecuteFTSearch(et_iter, result_heap, blockmax_loop_cnt);
+        ExecuteFTSearch(et_iter, result_heap, blockmax_loop_cnt, begin_threshold);
         result_heap.Sort();
         blockmax_result_count = result_heap.GetResultSize();
 #ifdef INFINITY_DEBUG
@@ -697,7 +708,7 @@ bool PhysicalMatch::ExecuteInnerHomebrewed(QueryContext *query_context, Operator
 #ifdef INFINITY_DEBUG
         auto blockmax_begin_ts = std::chrono::high_resolution_clock::now();
 #endif
-        ExecuteFTSearch(et_iter_2, result_heap, blockmax_loop_cnt_2);
+        ExecuteFTSearch(et_iter_2, result_heap, blockmax_loop_cnt_2, begin_threshold);
         result_heap.Sort();
         blockmax_result_count_2 = result_heap.GetResultSize();
 #ifdef INFINITY_DEBUG
@@ -709,7 +720,7 @@ bool PhysicalMatch::ExecuteInnerHomebrewed(QueryContext *query_context, Operator
             FullTextScoreResultHeap result_heap_3(top_n, blockmax_score_result_3.get(), blockmax_row_id_result_3.get());
             auto blockmax_begin_ts_3 = std::chrono::high_resolution_clock::now();
             u32 blockmax_loop_cnt_3 = 0;
-            ExecuteFTSearch(et_iter_3, result_heap_3, blockmax_loop_cnt_3);
+            ExecuteFTSearch(et_iter_3, result_heap_3, blockmax_loop_cnt_3, begin_threshold);
             result_heap_3.Sort();
             auto blockmax_end_ts_3 = std::chrono::high_resolution_clock::now();
             if (blockmax_loop_cnt_3 != blockmax_loop_cnt_2) {
