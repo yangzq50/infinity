@@ -539,13 +539,13 @@ void ExecuteFTSearch(UniquePtr<EarlyTerminateIterator> &et_iter, FullTextScoreRe
             et_iter->UpdateScoreThreshold(begin_threshold);
         }
         while (true) {
-            begin_threshold = 0.0f;
+            //begin_threshold = 0.0f;
             auto [id, et_score] = et_iter->BlockNextWithThreshold(begin_threshold);
             if (id == INVALID_ROWID) [[unlikely]] {
                 break;
             }
             ++blockmax_loop_cnt;
-            continue;
+            //continue;
             if (result_heap.AddResult(et_score, id)) {
                 // update threshold
                 if (const float new_threshold = result_heap.GetScoreThreshold(); new_threshold > begin_threshold) {
