@@ -66,7 +66,7 @@ void Scorer::AddBlockMaxPhraseDocIterator(BlockMaxPhraseDocIterator *iter, u64 c
 }
 
 float Scorer::Score(RowID doc_id) {
-    //return 0.0f;
+    return 0.0f;
     float score = 0.0F;
     for (u32 i = 0; i < column_counter_; i++) {
         BM25Ranker ranker(total_df_);

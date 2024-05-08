@@ -140,7 +140,7 @@ Pair<tf_t, u32> BlockMaxTermDocIterator::GetScoreData() { return {iter_.GetCurre
 
 // weight included
 float BlockMaxTermDocIterator::BM25Score() {
-    //return 0.0f;
+    return 0.0f;
     ++cnt_in_128;
     if (doc_id_ == prev_calc_score_doc_id_) {
         ++duplicate_calc_score_cnt_;
