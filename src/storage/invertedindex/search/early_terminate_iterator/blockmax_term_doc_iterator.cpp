@@ -39,6 +39,9 @@ BlockMaxTermDocIterator::~BlockMaxTermDocIterator() {
         << "\n    access_bm_score_cnt: " << access_bm_score_cnt_ << " calc_bm_score_cnt: " << calc_bm_score_cnt_
         << " calc_score_cnt: " << calc_score_cnt_ << " seek_cnt: " << seek_cnt_ << " peek_cnt: " << peek_cnt_
         << " block_skip_cnt: " << block_skip_cnt_ << " block_skip_cnt_inner: " << block_skip_cnt_inner_ << "\n";
+    oss << " cnt_tot_128: " << cnt_tot_128 << " cnt_tot_128_fit_9: " << cnt_tot_128_fit_9 << " cnt_tot_128_fit_95: " << cnt_tot_128_fit_95
+        << " cnt_tot_128_fit_98: " << cnt_tot_128_fit_98 << " cnt_tot_128_fit_99: " << cnt_tot_128_fit_99
+        << " cnt_tot_128_overflow: " << cnt_tot_128_overflow << '\n';
     if (duplicate_calc_score_cnt_) {
         oss << "!!! duplicate_calc_score_cnt: " << duplicate_calc_score_cnt_ << '\n';
     }
@@ -100,6 +103,32 @@ float BlockMaxTermDocIterator::BlockMaxBM25Score() {
         return block_max_bm25_score_cache_;
     } else {
         ++calc_bm_score_cnt_;
+        {
+            if (cnt_in_128) {
+                ++cnt_tot_128;
+                if (cnt_in_128_fit_9) {
+                    ++cnt_tot_128_fit_9;
+                }
+                if (cnt_in_128_fit_95) {
+                    ++cnt_tot_128_fit_95;
+                }
+                if (cnt_in_128_fit_98) {
+                    ++cnt_tot_128_fit_98;
+                }
+                if (cnt_in_128_fit_99) {
+                    ++cnt_tot_128_fit_99;
+                }
+                if (cnt_in_128_overflow) {
+                    ++cnt_tot_128_overflow;
+                }
+            }
+            cnt_in_128 = 0;
+            cnt_in_128_fit_9 = 0;
+            cnt_in_128_fit_95 = 0;
+            cnt_in_128_fit_98 = 0;
+            cnt_in_128_fit_99 = 0;
+            cnt_in_128_overflow = 0;
+        }
         block_max_bm25_score_cache_end_id_ = last_doc_id;
         // bm25_common_score_ / (1.0F + k1 * ((1.0F - b) / block_max_tf + b / block_max_percentage / avg_column_len));
         const auto [block_max_tf, block_max_percentage_u16] = GetBlockMaxInfo();
@@ -111,6 +140,8 @@ Pair<tf_t, u32> BlockMaxTermDocIterator::GetScoreData() { return {iter_.GetCurre
 
 // weight included
 float BlockMaxTermDocIterator::BM25Score() {
+    return 0.0f;
+    ++cnt_in_128;
     if (doc_id_ == prev_calc_score_doc_id_) {
         ++duplicate_calc_score_cnt_;
     } else {
@@ -120,7 +151,23 @@ float BlockMaxTermDocIterator::BM25Score() {
     // bm25_common_score_ * tf / (tf + k1 * (1.0F - b + b * column_len / avg_column_len));
     const auto [tf, doc_len] = GetScoreData();
     const float p = f1 + f2 * doc_len;
-    return bm25_common_score_ * tf / (tf + p);
+    const float res = bm25_common_score_ * tf / (tf + p);
+    if (res > 0.9 * BlockMaxBM25Score()) {
+        ++cnt_in_128_fit_9;
+    }
+    if (res > 0.95 * BlockMaxBM25Score()) {
+        ++cnt_in_128_fit_95;
+    }
+    if (res > 0.98 * BlockMaxBM25Score()) {
+        ++cnt_in_128_fit_98;
+    }
+    if (res > 0.99 * BlockMaxBM25Score()) {
+        ++cnt_in_128_fit_99;
+    }
+    if (res > BlockMaxBM25Score()) {
+        ++cnt_in_128_overflow;
+    }
+    return res;
 }
 
 Pair<bool, RowID> BlockMaxTermDocIterator::SeekInBlockRange(RowID doc_id, RowID doc_id_no_beyond) {

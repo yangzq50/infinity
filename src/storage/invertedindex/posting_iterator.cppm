@@ -41,7 +41,7 @@ public:
     // u16: block max (ceil(tf / doc length) * numeric_limits<u16>::max())
     Pair<u32, u16> GetBlockMaxInfo() const;
 
-    RowID SeekDoc(RowID docId);
+    RowID SeekDoc(const RowID &docId);
 
     Pair<bool, RowID> PeekInBlockRange(RowID doc_id, RowID doc_id_no_beyond);
 
@@ -89,8 +89,12 @@ public:
         if (posting_option_.HasDocPayload()) {
             match_data.doc_payload_ = doc_payload_buffer_[GetDocOffsetInBuffer()];
         }
-
     }
+
+    void DecodeFunc();
+    void CalcPrefix(u32 *old_p, u32 v);
+    void Part2(RowID &current_row_id);
+    void Part3(RowID &current_row_id, const RowID &row_id);
 
 private:
     u32 GetCurrentSeekedDocCount() const { return posting_decoder_->InnerGetSeekedDocCount() + (GetDocOffsetInBuffer() + 1); }
@@ -128,7 +132,8 @@ private:
     // info for decode buffer
     RowID current_row_id_ = INVALID_ROWID;
     docid_t *doc_buffer_cursor_ = nullptr;
-    docid_t doc_buffer_[MAX_DOC_PER_RECORD] = {};
+    alignas(32) docid_t doc_buffer_[MAX_DOC_PER_RECORD] = {};
+    u32 decode_end_pos = 0;
     docid_t *doc_buffer_base_ = nullptr;
     i32 tf_buffer_cursor_ = 0;
     tf_t *tf_buffer_ = nullptr;

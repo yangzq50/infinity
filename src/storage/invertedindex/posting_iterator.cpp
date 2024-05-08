@@ -3,6 +3,7 @@ module;
 #include "common/utility/builtin.h"
 #include <cassert>
 #include <vector>
+#include <x86intrin.h>
 import stl;
 import memory_pool;
 import byte_slice_reader;
@@ -50,6 +51,7 @@ bool PostingIterator::Init(SharedPtr<Vector<SegmentPosting>> seg_postings, const
 bool PostingIterator::SkipTo(RowID doc_id) {
     if (doc_id > last_doc_id_in_current_block_ or last_doc_id_in_current_block_ == INVALID_ROWID) {
         finish_decode_docid_ = false;
+        decode_end_pos = 0;
         return posting_decoder_->SkipTo(doc_id,
                                         last_doc_id_in_prev_block_,
                                         lowest_possible_doc_id_in_current_block_,
@@ -63,7 +65,82 @@ bool PostingIterator::SkipTo(RowID doc_id) {
 // u16: block max (ceil(tf / doc length) * numeric_limits<u16>::max())
 Pair<u32, u16> PostingIterator::GetBlockMaxInfo() const { return posting_decoder_->GetBlockMaxInfo(); }
 
-RowID PostingIterator::SeekDoc(RowID row_id) {
+void prefix(int *p) {
+    __m256i x = _mm256_load_si256((__m256i *)p);
+    x = _mm256_add_epi32(x, _mm256_slli_si256(x, 4));
+    x = _mm256_add_epi32(x, _mm256_slli_si256(x, 8));
+    _mm256_store_si256((__m256i *)p, x);
+}
+
+__m128i accumulate(int *p, __m128i s) {
+    __m128i d = (__m128i)_mm_broadcast_ss((float *)&p[3]);
+    __m128i x = _mm_load_si128((__m128i *)p);
+    x = _mm_add_epi32(s, x);
+    _mm_store_si128((__m128i *)p, x);
+    return _mm_add_epi32(s, d);
+}
+
+template <int I, int N>
+void PrefixT(int *a) {
+    prefix(a);
+    if constexpr (I + 8 < N) {
+        PrefixT<I + 8, N>(a + 8);
+    }
+}
+
+template <int N>
+void Prefix(int *a, int prev) {
+    PrefixT<0, N>(a);
+    __m128i s = _mm_set1_epi32(prev);
+    for (int i = 0; i < N; i += 4) {
+        s = accumulate(&a[i], s);
+    }
+}
+
+void PostingIterator::CalcPrefix(u32 *old_p, u32 v) { Prefix<32>(reinterpret_cast<int *>(old_p), v); }
+
+void PostingIterator::DecodeFunc() {
+    posting_decoder_->DecodeCurrentDocIDBuffer(doc_buffer_);
+    CalcPrefix(doc_buffer_, last_doc_id_in_prev_block_.segment_offset_);
+}
+
+void LoopFind(auto &pp, const RowID &row_id) {
+    const auto cmp = row_id.segment_offset_;
+    while (*pp < cmp) {
+        ++pp;
+    }
+}
+
+void PostingIterator::Part2(RowID &current_row_id) {
+    if (!finish_decode_docid_) {
+        DecodeFunc();
+        current_row_id_ = current_row_id = RowID(last_doc_id_in_prev_block_.segment_id_, doc_buffer_[0]);
+        doc_buffer_cursor_ = doc_buffer_ + 1;
+        decode_end_pos = 32;
+        finish_decode_docid_ = true;
+    }
+}
+
+void PostingIterator::Part3(RowID &current_row_id, const RowID &row_id) {
+    while (current_row_id < row_id) {
+        const auto p = doc_buffer_ + decode_end_pos;
+        if (row_id.segment_offset_ <= *(p - 1)) {
+            // have result
+            auto pp = doc_buffer_cursor_;
+            LoopFind(pp, row_id);
+            current_row_id_ = current_row_id = RowID(last_doc_id_in_prev_block_.segment_id_, *pp);
+            doc_buffer_cursor_ = pp + 1;
+            break;
+        }
+        CalcPrefix(p, *(p - 1));
+        current_row_id_ = current_row_id = RowID(last_doc_id_in_prev_block_.segment_id_, *p);
+        doc_buffer_cursor_ = p + 1;
+        decode_end_pos += 32;
+    }
+    need_move_to_current_doc_ = true;
+}
+
+RowID PostingIterator::SeekDoc(const RowID &row_id) {
     RowID current_row_id = finish_decode_docid_ ? current_row_id_ : INVALID_ROWID;
     if (row_id == current_row_id) [[unlikely]] {
         return current_row_id;
@@ -76,19 +153,8 @@ RowID PostingIterator::SeekDoc(RowID row_id) {
         current_row_id_ = INVALID_ROWID;
         return INVALID_ROWID;
     }
-    if (!finish_decode_docid_) {
-        posting_decoder_->DecodeCurrentDocIDBuffer(doc_buffer_);
-        current_row_id = last_doc_id_in_prev_block_ + doc_buffer_[0];
-        doc_buffer_cursor_ = doc_buffer_ + 1;
-        finish_decode_docid_ = true;
-    }
-    docid_t *cursor = doc_buffer_cursor_;
-    while (current_row_id < row_id) {
-        current_row_id += *(cursor++);
-    }
-    current_row_id_ = current_row_id;
-    doc_buffer_cursor_ = cursor;
-    need_move_to_current_doc_ = true;
+    Part2(current_row_id);
+    Part3(current_row_id, row_id);
     return current_row_id;
 }
 

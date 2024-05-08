@@ -100,6 +100,18 @@ private:
     u32 peek_cnt_ = 0;
     u32 block_skip_cnt_ = 0;
     u32 block_skip_cnt_inner_ = 0;
+    u32 cnt_in_128 = 0;
+    u32 cnt_in_128_fit_9 = 0;
+    u32 cnt_in_128_fit_95 = 0;
+    u32 cnt_in_128_fit_98 = 0;
+    u32 cnt_in_128_fit_99 = 0;
+    u32 cnt_in_128_overflow = 0;
+    u32 cnt_tot_128 = 0;
+    u32 cnt_tot_128_fit_9 = 0;
+    u32 cnt_tot_128_fit_95 = 0;
+    u32 cnt_tot_128_fit_98 = 0;
+    u32 cnt_tot_128_fit_99 = 0;
+    u32 cnt_tot_128_overflow = 0;
 };
 
 } // namespace infinity
