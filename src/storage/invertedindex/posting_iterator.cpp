@@ -158,7 +158,19 @@ RowID PostingIterator::SeekDoc(const RowID &row_id) {
         current_row_id_ = INVALID_ROWID;
         return INVALID_ROWID;
     }
-    Part23(current_row_id, row_id);
+    if (!finish_decode_docid_) {
+        posting_decoder_->DecodeCurrentDocIDBuffer(doc_buffer_);
+        current_row_id = last_doc_id_in_prev_block_ + doc_buffer_[0];
+        doc_buffer_cursor_ = doc_buffer_ + 1;
+        finish_decode_docid_ = true;
+    }
+    docid_t *cursor = doc_buffer_cursor_;
+    while (current_row_id < row_id) {
+        current_row_id += *(cursor++);
+    }
+    current_row_id_ = current_row_id;
+    doc_buffer_cursor_ = cursor;
+    need_move_to_current_doc_ = true;
     return current_row_id;
 }
 
