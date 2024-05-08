@@ -14,6 +14,7 @@
 
 module;
 
+#include <valgrind/callgrind.h>
 #include <cassert>
 #include <chrono>
 #include <iostream>
@@ -687,6 +688,7 @@ bool PhysicalMatch::ExecuteInnerHomebrewed(QueryContext *query_context, Operator
 #ifdef INFINITY_DEBUG
             auto ordinary_begin_ts = std::chrono::high_resolution_clock::now();
 #endif
+            CALLGRIND_START_INSTRUMENTATION;
             do {
                 ++ordinary_loop_cnt;
                 // call scorer
@@ -695,6 +697,7 @@ bool PhysicalMatch::ExecuteInnerHomebrewed(QueryContext *query_context, Operator
                 // get next row_id
                 iter_row_id = doc_iterator->Next();
             } while (iter_row_id != INVALID_ROWID);
+            CALLGRIND_STOP_INSTRUMENTATION;
             result_heap.Sort();
             ordinary_result_count = result_heap.GetResultSize();
 #ifdef INFINITY_DEBUG
