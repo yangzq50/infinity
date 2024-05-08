@@ -95,6 +95,7 @@ public:
     void CalcPrefix(u32 *old_p, u32 v);
     void Part2(RowID &current_row_id);
     void Part3(RowID &current_row_id, const RowID &row_id);
+    void Part23(RowID &current_row_id, const RowID &row_id);
 
 private:
     u32 GetCurrentSeekedDocCount() const { return posting_decoder_->InnerGetSeekedDocCount() + (GetDocOffsetInBuffer() + 1); }

@@ -140,6 +140,11 @@ void PostingIterator::Part3(RowID &current_row_id, const RowID &row_id) {
     need_move_to_current_doc_ = true;
 }
 
+void PostingIterator::Part23(RowID &current_row_id, const RowID &row_id) {
+    Part2(current_row_id);
+    Part3(current_row_id, row_id);
+}
+
 RowID PostingIterator::SeekDoc(const RowID &row_id) {
     RowID current_row_id = finish_decode_docid_ ? current_row_id_ : INVALID_ROWID;
     if (row_id == current_row_id) [[unlikely]] {
@@ -153,8 +158,7 @@ RowID PostingIterator::SeekDoc(const RowID &row_id) {
         current_row_id_ = INVALID_ROWID;
         return INVALID_ROWID;
     }
-    Part2(current_row_id);
-    Part3(current_row_id, row_id);
+    Part23(current_row_id, row_id);
     return current_row_id;
 }
 
