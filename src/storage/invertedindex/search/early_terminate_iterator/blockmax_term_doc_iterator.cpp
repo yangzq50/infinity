@@ -17,8 +17,8 @@ module;
 #include <cassert>
 #include <cmath>
 #include <iostream>
-#include <tuple>
 #include <string>
+#include <tuple>
 module blockmax_term_doc_iterator;
 
 import stl;
@@ -67,7 +67,7 @@ bool BlockMaxTermDocIterator::BlockSkipTo(RowID doc_id, float threshold) {
             doc_id_ = INVALID_ROWID;
             return false;
         }
-        if (BlockMaxBM25Score() >= threshold) {
+        if (threshold == 0.0f or BlockMaxBM25Score() >= threshold) {
             return true;
         }
         doc_id = BlockLastDocID() + 1;
