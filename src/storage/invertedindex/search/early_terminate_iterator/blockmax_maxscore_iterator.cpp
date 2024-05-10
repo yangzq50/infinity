@@ -94,18 +94,8 @@ bool BlockMaxMaxscoreIterator::BlockSkipTo(RowID doc_id, const float threshold) 
             common_block_min_possible_doc_id_ = doc_id;
             common_block_last_doc_id_ = next_candidate - 1;
             assert((common_block_max_bm25_score_ >= threshold));
-            // update must have
             u32 must_have_before = global_must_have_before_;
             float must_have_total_upper_bound_score = global_must_have_total_upper_bound_score_;
-            while (must_have_before < sorted_iterators_.size() and
-                   threshold > must_have_total_upper_bound_score + common_block_max_bm25_score_parts_[must_have_before]) {
-                must_have_total_upper_bound_score += sorted_iterators_[must_have_before++]->BlockMaxBM25Score();
-            }
-            // if (must_have_before != global_must_have_before_) {
-            //     must_have_history_.emplace_back(must_have_before, doc_id_.ToUint64());
-            // }
-            must_have_before_ = must_have_before;
-            must_have_total_upper_bound_score_ = must_have_total_upper_bound_score;
             if (must_have_before == 0) {
                 // update pivot
                 u32 pivot = global_pivot_;
@@ -116,7 +106,20 @@ bool BlockMaxMaxscoreIterator::BlockSkipTo(RowID doc_id, const float threshold) 
                 //     pivot_history_.emplace_back(pivot, doc_id_.ToUint64());
                 // }
                 pivot_ = pivot;
+                if (pivot == 1) {
+                    must_have_total_upper_bound_score += sorted_iterators_[must_have_before++]->BlockMaxBM25Score();
+                }
             }
+            // update must have
+            while (must_have_before < sorted_iterators_.size() and
+                   threshold > must_have_total_upper_bound_score + common_block_max_bm25_score_parts_[must_have_before]) {
+                must_have_total_upper_bound_score += sorted_iterators_[must_have_before++]->BlockMaxBM25Score();
+            }
+            // if (must_have_before != global_must_have_before_) {
+            //     must_have_history_.emplace_back(must_have_before, doc_id_.ToUint64());
+            // }
+            must_have_before_ = must_have_before;
+            must_have_total_upper_bound_score_ = must_have_total_upper_bound_score;
             return true;
         }
         if (next_candidate == INVALID_ROWID) {

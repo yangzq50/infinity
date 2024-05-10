@@ -55,8 +55,17 @@ bool BlockMaxAndIterator::BlockSkipTo(RowID doc_id, const float threshold) {
         return false;
     }
     while (true) {
-        RowID common_block_last_doc_id = INVALID_ROWID;
-        u32 i = 0;
+        const auto &first_it = sorted_iterators_[0];
+        if (!first_it->BlockSkipTo(doc_id, sub_threshold_[0])) {
+            // no more possible results
+            return false;
+        }
+        // success in block skip
+        const auto [_, d] = first_it->SeekInBlockRange(doc_id, INVALID_ROWID);
+        assert(_);
+        doc_id = d;
+        u32 i = 1;
+        RowID common_block_last_doc_id = first_it->BlockLastDocID();
         for (; i < sorted_iterators_.size(); ++i) {
             const auto &it = sorted_iterators_[i];
             if (!it->BlockSkipTo(doc_id, sub_threshold_[i])) {
