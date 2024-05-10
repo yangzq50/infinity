@@ -70,7 +70,22 @@ bool BlockMaxMaxscoreIterator::BlockSkipTo(RowID doc_id, const float threshold) 
         RowID next_candidate = INVALID_ROWID;
         bool match_any = false;
         u32 i = 0;
-        for (float min_leftover_threshold = threshold; i < sorted_iterators_.size(); ++i) {
+        float min_leftover_threshold = threshold;
+        if (global_must_have_before_) {
+            if (const auto &it = sorted_iterators_[0]; it->BlockSkipTo(doc_id, sub_threshold_[0])) {
+                // success in block skip
+                const auto [suc, id] = it->SeekInBlockRange(doc_id, INVALID_ROWID);
+                assert(suc);
+                doc_id = id;
+                match_any = true;
+                min_leftover_threshold -= it->BlockMaxBM25Score();
+                next_candidate = std::min(next_candidate, it->BlockLastDocID() + 1);
+                i = 1;
+            } else {
+                return false;
+            }
+        }
+        for (; i < sorted_iterators_.size(); ++i) {
             if (const auto &it = sorted_iterators_[i]; it->BlockSkipTo(doc_id, sub_threshold_[i])) {
                 // success in block skip
                 if (const RowID lowest_possible = it->BlockMinPossibleDocID(); lowest_possible <= doc_id) {
