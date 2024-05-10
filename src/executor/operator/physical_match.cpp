@@ -538,6 +538,7 @@ void ExecuteFTSearch(UniquePtr<EarlyTerminateIterator> &et_iter, FullTextScoreRe
         if (begin_threshold > 0.0f) {
             et_iter->UpdateScoreThreshold(begin_threshold);
         }
+        CALLGRIND_START_INSTRUMENTATION;
         while (true) {
             //begin_threshold = 0.0f;
             auto [id, et_score] = et_iter->BlockNextWithThreshold(begin_threshold);
@@ -554,6 +555,7 @@ void ExecuteFTSearch(UniquePtr<EarlyTerminateIterator> &et_iter, FullTextScoreRe
                 }
             }
         }
+        CALLGRIND_STOP_INSTRUMENTATION;
     }
 }
 
