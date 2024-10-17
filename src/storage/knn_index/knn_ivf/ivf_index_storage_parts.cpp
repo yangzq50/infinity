@@ -268,11 +268,40 @@ IVF_Part_Storage::Make(u32 part_id, u32 embedding_dimension, EmbeddingDataType e
     }
 }
 
+class IVF_Parts_Storage_Common : public IVF_Parts_Storage {
+    Vector<UniquePtr<IVF_Part_Storage>> ivf_part_storages_ = {};
+
+public:
+    IVF_Parts_Storage_Common(const u32 embedding_dimension, const u32 centroids_num) : IVF_Parts_Storage(embedding_dimension, centroids_num) {
+        ivf_part_storages_.resize(centroids_num);
+    }
+};
+
+template <IndexIVFStorageOption::Type t>
+class IVF_Parts_Storage_T;
+
+template <>
+class IVF_Parts_Storage_T<IndexIVFStorageOption::Type::kPlain> final : public IVF_Parts_Storage_Common {
+    using IVF_Parts_Storage_Common::IVF_Parts_Storage_Common;
+};
+
 UniquePtr<IVF_Parts_Storage> IVF_Parts_Storage::Make(const u32 embedding_dimension,
                                                      const u32 centroids_num,
                                                      const EmbeddingDataType embedding_data_type,
                                                      const IndexIVFStorageOption &ivf_storage_option) {
-    // TODO
+    switch (ivf_storage_option.type_) {
+        case IndexIVFStorageOption::Type::kPlain: {
+            return MakeUnique<IVF_Parts_Storage_T>(embedding_dimension, centroids_num);
+        }
+        case IndexIVFStorageOption::Type::kScalarQuantization: {
+            UnrecoverableError("Not implemented");
+            return {};
+        }
+        case IndexIVFStorageOption::Type::kProductQuantization: {
+            UnrecoverableError("Not implemented");
+            return {};
+        }
+    }
 }
 
 } // namespace infinity
